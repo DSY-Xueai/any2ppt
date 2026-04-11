@@ -167,6 +167,8 @@ def build_presentation(page_plans, output_path: Path) -> None:
             run = paragraph.runs[0]
             run.font.size = Pt(block.font_size)
             run.font.color.rgb = RGBColor.from_string(block.color.lstrip("#"))
+            if getattr(block, "font_name", None):
+                run.font.name = block.font_name
 
         for block in page.image_blocks:
             if not Path(block.path).exists():
@@ -178,5 +180,9 @@ def build_presentation(page_plans, output_path: Path) -> None:
                 width=Emu(int(block.width * scale_x)),
                 height=Emu(int(block.height * scale_y)),
             )
+
+        for _effect in getattr(page, "effect_blocks", []):
+            # Stage 2 uses fail-closed effect handling. Unsupported effects stay in the background.
+            continue
 
     presentation.save(output_path)

@@ -45,3 +45,14 @@ Probe these packages at runtime before enabling extraction paths that depend on 
 - Prefer native PDF text extraction through `PyMuPDF` before OCR.
 - Use `PaddleOCR` when available for scanned pages and image inputs; allow other OCR fallbacks when the runtime environment requires it.
 - Keep background-first PPT output as the invariant, then add filtered editable text and image layers.
+
+## Stage 2 rules
+- Stage 2 only promotes text when layout can remain fully identical.
+- Stage 2 may map common effects when they are simple and safe to reproduce.
+- If exact text fitting or effect mapping cannot be verified, fail closed and keep the content in the background layer.
+
+## 2B rules
+- 2B covers layering, vector boundary handling, and blend-heavy reconstruction cases.
+- Treat layered objects as first-class page-plan data so later stages can preserve the original stack order.
+- Keep vector boundaries conservative; if a vector boundary cannot be reconstructed safely, leave it in the background layer.
+- For blend-heavy pages, fail closed and prefer the background layer over speculative reconstruction.

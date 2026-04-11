@@ -16,6 +16,11 @@
 - Use `scripts/dependencies.py` to detect runtime support before enabling optional extraction paths.
 - Treat OCR support as optional; missing OCR support must not block fidelity-first PPT output.
 
+## Stage 2 scope
+- 2A covers strict text fitting validation and common effects.
+- 2B is reserved for complex vectors, layered transparency, and harder reconstruction tasks.
+- Current 2B groundwork focuses on layering, vector boundaries, and fail-closed blend grouping rather than full blend reconstruction.
+
 ## Fallback policy
 - Preserve background fidelity first
 - Only promote high-confidence text and images
@@ -26,3 +31,4 @@
 - OCR uncertainty on scanned pages can block editable text promotion
 - Complex effects remain in the background layer
 - Stage-one runtime upgrade still prioritizes text and image layers over complex vector/effect reconstruction
+- Exact text reproduction still depends on deterministic fit validation, otherwise the text must remain in the background.
