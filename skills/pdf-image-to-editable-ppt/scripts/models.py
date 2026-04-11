@@ -33,5 +33,8 @@ class PagePlan:
     width_px: int
     height_px: int
     background_path: str
+    source_type: str = "image"
+    page_width_points: float | None = None
+    page_height_points: float | None = None
     text_blocks: list[TextBlock] = field(default_factory=list)
     image_blocks: list[ImageBlock] = field(default_factory=list)
