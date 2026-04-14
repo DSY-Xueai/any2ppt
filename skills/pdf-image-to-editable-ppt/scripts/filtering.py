@@ -14,6 +14,7 @@ def select_editable_blocks(
         width_px=plan.width_px,
         height_px=plan.height_px,
         background_path=plan.background_path,
+        background_color=plan.background_color,
     )
     filtered.text_blocks = [
         block for block in plan.text_blocks if block.confidence >= min_text_confidence

@@ -10,6 +10,7 @@ def apply_stage2_enhancements(plan: PagePlan) -> PagePlan:
         height_px=plan.height_px,
         background_path=plan.background_path,
         source_type=plan.source_type,
+        background_color=plan.background_color,
         page_width_points=plan.page_width_points,
         page_height_points=plan.page_height_points,
     )

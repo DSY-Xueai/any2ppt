@@ -17,6 +17,7 @@ def build_page_plan(
     background_path,
     text_items,
     image_items,
+    background_color=None,
     layered_objects=None,
     vector_instructions=None,
     source_type="image",
@@ -29,6 +30,7 @@ def build_page_plan(
         height_px=height_px,
         background_path=background_path,
         source_type=source_type,
+        background_color=background_color,
         page_width_points=page_width_points,
         page_height_points=page_height_points,
     )

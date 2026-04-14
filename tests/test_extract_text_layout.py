@@ -69,6 +69,14 @@ def test_extract_text_layout_prefers_native_pdf_text(tmp_path, monkeypatch):
     assert result[0]["alignment"] == "center"
     assert result[0]["color"] == "#112233"
     assert result[0]["confidence"] == 0.99
+    # Coordinates must be scaled by RENDER_SCALE=2 to match rendered pixel space
+    # Raw PDF bbox is [10, 20, 110, 60] → left=10, top=20, width=100, height=40
+    assert result[0]["left"] == pytest.approx(20.0)
+    assert result[0]["top"] == pytest.approx(40.0)
+    assert result[0]["width"] == pytest.approx(200.0)
+    assert result[0]["height"] == pytest.approx(80.0)
+    # font_size must NOT be scaled — stays in PDF points
+    assert result[0]["font_size"] == pytest.approx(18.0)
 
 
 def test_extract_text_layout_falls_back_to_ocr_for_images(tmp_path, monkeypatch):
@@ -77,6 +85,20 @@ def test_extract_text_layout_falls_back_to_ocr_for_images(tmp_path, monkeypatch)
 
     class FakeImage:
         size = (200, 100)
+        width = 200
+        height = 100
+
+        def convert(self, mode):
+            return self
+
+        def getpixel(self, xy):
+            return (0, 0, 0)
+
+        def crop(self, box):
+            return self
+
+        def close(self):
+            pass
 
     monkeypatch.setattr(
         "pytesseract.image_to_data",
@@ -96,4 +118,3 @@ def test_extract_text_layout_falls_back_to_ocr_for_images(tmp_path, monkeypatch)
     assert len(result) == 1
     assert result[0]["text"] == "Hello"
     assert result[0]["confidence"] == pytest.approx(0.87)
-    assert result[0]["font_size"] == 20.0

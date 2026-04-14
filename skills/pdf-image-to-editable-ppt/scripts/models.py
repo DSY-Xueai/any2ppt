@@ -71,6 +71,7 @@ class PagePlan:
     height_px: int
     background_path: str
     source_type: str = "image"
+    background_color: str | None = None
     page_width_points: float | None = None
     page_height_points: float | None = None
     text_blocks: list[TextBlock] = field(default_factory=list)

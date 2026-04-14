@@ -107,12 +107,28 @@ def _build_minimal_pptx(output_path: Path, slide_count: int) -> None:
             archive.writestr(f"ppt/slides/slide{index}.xml", blank_slide)
 
 
+def _set_east_asian_font(run, font_name: str = "Microsoft YaHei") -> None:
+    """Set the East Asian font for a text run (needed for Chinese characters)."""
+    from pptx.oxml.ns import qn
+
+    rPr = run._r.get_or_add_rPr()
+    existing = rPr.findall(qn("a:ea"))
+    for elem in existing:
+        rPr.remove(elem)
+    ea_font = rPr.makeelement(qn("a:ea"), {})
+    ea_font.set("typeface", font_name)
+    rPr.append(ea_font)
+
+
 def build_presentation(page_plans, output_path: Path) -> None:
     slide_count = max(len(page_plans), 1)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Only check background_path existence when we'll actually embed it
     for page in page_plans:
-        if not Path(page.background_path).exists():
-            raise FileNotFoundError(page.background_path)
+        if not getattr(page, "background_color", None):
+            if not Path(page.background_path).exists():
+                raise FileNotFoundError(page.background_path)
 
     try:
         from pptx import Presentation
@@ -143,24 +159,35 @@ def build_presentation(page_plans, output_path: Path) -> None:
 
     for page in page_plans:
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        slide.shapes.add_picture(
-            str(page.background_path),
-            0,
-            0,
-            width=presentation.slide_width,
-            height=presentation.slide_height,
-        )
+
+        bg_color = getattr(page, "background_color", None)
+        if bg_color:
+            # Editable mode: set solid background color, no full-page image
+            background = slide.background
+            fill = background.fill
+            fill.solid()
+            fill.fore_color.rgb = RGBColor.from_string(bg_color.lstrip("#"))
+        else:
+            # Legacy mode: full-page background image
+            slide.shapes.add_picture(
+                str(page.background_path),
+                0,
+                0,
+                width=presentation.slide_width,
+                height=presentation.slide_height,
+            )
 
         scale_x = presentation.slide_width / max(page.width_px, 1)
         scale_y = presentation.slide_height / max(page.height_px, 1)
 
         for block in page.text_blocks:
             textbox = slide.shapes.add_textbox(
-                Emu(int(block.left * scale_x)),
-                Emu(int(block.top * scale_y)),
-                Emu(int(block.width * scale_x)),
-                Emu(int(block.height * scale_y)),
+                Emu(round(block.left * scale_x)),
+                Emu(round(block.top * scale_y)),
+                Emu(round(block.width * scale_x)),
+                Emu(round(block.height * scale_y)),
             )
+            textbox.text_frame.word_wrap = True
             paragraph = textbox.text_frame.paragraphs[0]
             paragraph.text = block.text
             paragraph.alignment = alignment_map.get(block.alignment, PP_ALIGN.LEFT)
@@ -169,16 +196,19 @@ def build_presentation(page_plans, output_path: Path) -> None:
             run.font.color.rgb = RGBColor.from_string(block.color.lstrip("#"))
             if getattr(block, "font_name", None):
                 run.font.name = block.font_name
+            else:
+                run.font.name = "Arial"
+            _set_east_asian_font(run)
 
         for block in page.image_blocks:
             if not Path(block.path).exists():
                 continue
             slide.shapes.add_picture(
                 block.path,
-                Emu(int(block.left * scale_x)),
-                Emu(int(block.top * scale_y)),
-                width=Emu(int(block.width * scale_x)),
-                height=Emu(int(block.height * scale_y)),
+                Emu(round(block.left * scale_x)),
+                Emu(round(block.top * scale_y)),
+                width=Emu(round(block.width * scale_x)),
+                height=Emu(round(block.height * scale_y)),
             )
 
         for _effect in getattr(page, "effect_blocks", []):
