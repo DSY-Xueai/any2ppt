@@ -1,10 +1,44 @@
+# --- Old project patterns ---
 .worktrees/
 .tmp-pytest/
 stage2tmp/
 .pytest_cache/
 pytest-cache-files-*/
-__pycache__/
-*.pyc
 tessdata/
 *_assets/
+verify-main-temp/
+
+# --- ppt-master workspace ---
+projects/*
+!projects/README.md
+exports/
+
+# --- Environment ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+env/
+.venv/
+
+# --- Generated ---
 *.pptx
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- IDE ---
+.vscode/
+.idea/
+
+# --- Temp ---
+*.tmp
+*.temp

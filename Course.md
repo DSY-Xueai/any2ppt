@@ -1,50 +1,59 @@
 # Course
 
 ## 当前项目状态
-- `skills/pdf-image-to-editable-ppt` 采用**混合策略**：渲染背景图保证视觉保真 + 原生 PDF 文字叠加为可编辑文本框。
-- 阶段一 runtime pipeline 已完成并单独提交。
-- 阶段二已补到两层：
-  - `2A`：文字严格拟合校验、常见效果映射、stage2 保守增强入口。
-  - `2B`：页面分层、矢量候选映射、blend 分组回退基础设施。
+- 已集成 `hugohe3/ppt-master` 作为基础设施（SVG→PPTX DrawingML 转换管线）。
+- 新增 `faithful_convert.py`：忠实还原转换器，支持两种模式：
+  - `--mode ai`：AI 视觉全元素重建（多模态 AI 分析图片→识别元素→原生 SVG 重建 + 复杂区域裁剪嵌入）
+  - `--mode ocr`：背景图 + OCR 文字叠加（Tesseract）
+- 新增 `vision_analyzer.py`：多模态 AI 视觉分析模块，支持 Anthropic / OpenAI / 任意 OpenAI 兼容 API。
+- 新增 `auto_convert.py`：自动化编排脚本（prepare + export 两阶段）。
+- 旧 skill `pdf-image-to-editable-ppt` 已归档至 `archive/`。
 
-## 本轮新增或变更
-- **策略重构**：从"纯色背景+图表裁剪"改为"渲染背景图+原生文字叠加"混合策略。
-  - `convert_to_ppt.py` 移除 `detect_background_color`、`extract_images`、`_remove_overlapping_text` 调用。
-  - 每页始终嵌入渲染 PNG 作为全页背景图（`bg_color=None`），保证视觉保真。
-  - 原生 PDF 文字以透明文本框叠加在背景上，保持可编辑性。
-  - 图表裁剪不再执行（图表已在背景图中）。
-- **修复坐标系错位**（保留）：原生 PDF 文字坐标 ×RENDER_SCALE=2 对齐渲染像素空间。
-- **修复 EMU 精度**（保留）：`build_ppt.py` 中 `int()` → `round()`。
-- **字号校正系数**（保留）：0.70 → 0.75，参数化。
+## 本轮变更
+- **架构替换**：从 OCR+背景图叠加方案切换到 AI 驱动的混合裁剪策略。
+- 集成 `hugohe3/ppt-master` 的 `skills/ppt-master/` 完整目录（SVG→PPTX、项目管理、源文档转换等）。
+- 新增 `faithful_convert.py`：核心转换入口，AI 模式下实现"复杂图形裁剪嵌入 + 文字/形状原生可编辑"。
+- 新增 `vision_analyzer.py`：多 provider AI 视觉分析（自动检测 Anthropic/OpenAI 环境变量）。
+- 新增 `auto_convert.py`：自动化编排（图片→PDF→Markdown→项目初始化→导入→导出）。
+- 新增 `image_to_pdf.py`：图片→PDF 桥接脚本。
+- 添加 `CLAUDE.md`、`AGENTS.md`、`.env.example`、`requirements.txt`。
+- 旧 skill、旧测试、旧 worktree（3 个 feature 分支）全部归档/清理。
 
-## 关键修改文件
-- `Course.md`
-- `skills/pdf-image-to-editable-ppt/scripts/models.py`
-- `skills/pdf-image-to-editable-ppt/scripts/page_segmentation.py` (新建)
-- `skills/pdf-image-to-editable-ppt/scripts/extract_text_layout.py`
-- `skills/pdf-image-to-editable-ppt/scripts/extract_images.py`
-- `skills/pdf-image-to-editable-ppt/scripts/build_ppt.py`
-- `skills/pdf-image-to-editable-ppt/scripts/convert_to_ppt.py`
-- `skills/pdf-image-to-editable-ppt/scripts/page_planner.py`
-- `skills/pdf-image-to-editable-ppt/scripts/filtering.py`
-- `skills/pdf-image-to-editable-ppt/scripts/stage2_enhance.py`
+## 关键文件
+- `faithful_convert.py` — 核心转换入口（AI 模式 / OCR 模式）
+- `vision_analyzer.py` — 多模态 AI 视觉分析模块
+- `auto_convert.py` — 自动化编排脚本
+- `skills/ppt-master/SKILL.md` — ppt-master 工作流定义
+- `skills/ppt-master/scripts/svg_to_pptx/` — SVG→原生 PPTX (DrawingML)
+- `skills/ppt-master/scripts/source_to_md/` — 源文档转 Markdown
+- `skills/ppt-master/scripts/source_to_md/image_to_pdf.py` — 图片→PDF 桥接
 
 ## 运行入口
-- `skills/pdf-image-to-editable-ppt/scripts/convert_to_ppt.py`
-- `skills/pdf-image-to-editable-ppt/scripts/build_ppt.py`
+```bash
+# AI 全元素重建（推荐）
+python faithful_convert.py input.png --mode ai --provider openai
+
+# OCR + 背景图模式（fallback）
+python faithful_convert.py input.pdf --mode ocr
+
+# 自动化编排
+python auto_convert.py prepare input.png --name my_project
+python auto_convert.py export projects/my_project_ppt169_xxx
+```
 
 ## 运行时依赖
-- `PyMuPDF` (fitz) — PDF 页面渲染
-- `Pillow` (PIL) — 图像处理
-- `python-pptx` (pptx) — PPT 生成
-- `pytesseract` + Tesseract OCR — 文字识别（需 chi_sim 语言包）
-- `PaddleOCR` (可选) — 备选 OCR
+- 见 `requirements.txt`（核心：python-pptx、PyMuPDF、Pillow、svglib、reportlab、anthropic、openai）
+- Tesseract OCR（OCR 模式需要，`C:\Program Files\Tesseract-OCR\`，需 chi_sim 语言包）
+
+## 关键目录
+- `skills/ppt-master/` — ppt-master skill（SVG→PPTX 基础设施）
+- `projects/` — 用户项目工作区（gitignored）
+- `exports/` — 导出的 PPTX（gitignored）
+- `archive/` — 旧 skill 归档
 
 ## 当前注意事项
-- 混合策略下，每页 PPT 由全页背景图 + 可编辑文本框组成。背景图保证视觉保真，文字可点击编辑。
-- Tesseract 中文包需手动安装到 tessdata 目录，或使用项目根目录下的 `tessdata/`（通过 `TESSDATA_PREFIX` 环境变量）。
-- OCR 仅在图片型 PDF（无原生文字）时启用；原生文字 PDF 直接提取，无 OCR 误差。
-- `RENDER_SCALE = 2` 必须与 `render_pdf_pages.py` 中 `fitz.Matrix(2, 2)` 保持一致。
-- `page_segmentation.py`、`extract_images.py` 等模块保留但不在主流程中调用，供后续可选增强模式使用。
-- 2B 复杂矢量真重建、多层透明/混合效果真重建还没落地。
-- `tessdata/` 和生成的 `*_assets/` 目录不应进入 git 提交。
+- AI 模式需要配置多模态 API（通过环境变量 `OPENAI_API_KEY` + `OPENAI_BASE_URL`，或 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL`）。
+- AI 模式下，复杂图形区域（插图、照片等）从原图裁剪嵌入，文字和简单形状为原生可编辑元素。
+- AI 还原度取决于模型能力，当前已验证 Claude Sonnet 4 可用。
+- `projects/` 和 `exports/` 已 gitignore。
+- 待优化：AI 元素识别精度、文字位置精确度、更多形状类型支持。
