@@ -73,6 +73,14 @@ def extract_foreground_mask(
         | (brightness_diff > diff_threshold * 1.2)
     )
 
+    # Edge-based detection: capture fine details (thin lines, icon outlines)
+    # that may have low diff but are clearly structural edges
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    # Include edge pixels that have at least some diff from background
+    edge_fg = (edges > 0) & (diff > diff_threshold * 0.35)
+    mask = mask | edge_fg
+
     # Exclude text regions — text will be rebuilt as editable text boxes
     if text_mask is not None:
         mask[text_mask > 0] = False
@@ -80,12 +88,15 @@ def extract_foreground_mask(
     mask = mask.astype(np.uint8) * 255
 
     # Morphological cleanup
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    # CLOSE: fill small holes inside foreground regions (beneficial)
+    kernel_close = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=2)
+    # OPEN: remove isolated noise pixels, but use 2x2 kernel to preserve thin lines
+    kernel_open = np.ones((2, 2), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
-    # Remove noise and grid lines
-    mask = _remove_noise_and_lines(mask)
+    # Remove small noise blobs and edge artifacts
+    mask = _remove_noise(mask, img_shape=(h, w))
 
     logger.info(
         "Foreground mask: %d non-zero pixels (%.1f%%)",
@@ -170,28 +181,37 @@ def split_components(
 # ---------------------------------------------------------------------------
 
 
-def _remove_noise_and_lines(
-    mask: np.ndarray, min_area: int = 15
+def _remove_noise(
+    mask: np.ndarray, min_area: int = 15, img_shape: tuple | None = None
 ) -> np.ndarray:
-    """Remove small noise blobs and thin grid lines from foreground mask."""
+    """Remove small noise blobs and edge artifacts from foreground mask.
+
+    Filters:
+    - Components smaller than min_area (noise)
+    - Components spanning >=90% of image height/width and <=5px thick (edge artifacts)
+    """
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
         mask, connectivity=8
     )
     clean = np.zeros_like(mask)
 
+    img_h, img_w = img_shape if img_shape else (mask.shape[0], mask.shape[1])
+
     for i in range(1, num_labels):
-        x, y, w, h, area = stats[i]
+        area = stats[i, cv2.CC_STAT_AREA]
+        x = stats[i, cv2.CC_STAT_LEFT]
+        y = stats[i, cv2.CC_STAT_TOP]
+        w = stats[i, cv2.CC_STAT_WIDTH]
+        h = stats[i, cv2.CC_STAT_HEIGHT]
 
         # Skip tiny noise
         if area < min_area:
             continue
 
-        # Skip thin horizontal lines (likely grid)
-        if w > 500 and h <= 3:
+        # Skip edge artifacts: thin strips spanning nearly full image dimension
+        if w <= 5 and h >= img_h * 0.9:
             continue
-
-        # Skip thin vertical lines (likely grid)
-        if h > 500 and w <= 3:
+        if h <= 5 and w >= img_w * 0.9:
             continue
 
         clean[labels == i] = 255

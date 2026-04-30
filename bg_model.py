@@ -3,8 +3,8 @@
 
 Builds a clean background image by:
 1. Adaptive background color detection (edge sampling)
-2. Periodic tile median modeling
-3. Inpainting to remove foreground/text residuals
+2. Using the original image as base (preserving real background)
+3. Inpainting foreground/text regions from surrounding pixels
 
 Usage:
     from bg_model import build_background
@@ -37,7 +37,7 @@ def build_background(
         img: Input image (H, W, 3) RGB uint8.
         text_mask: Binary mask (H, W) where text regions = 255.
         fg_hint_mask: Optional binary mask of known foreground regions.
-        period: Tile period for periodic median modeling.
+        period: Tile period (kept for API compatibility, unused in new approach).
 
     Returns:
         Clean background image (H, W, 3) RGB uint8.
@@ -59,13 +59,15 @@ def build_background(
         int(bg_color[0]), int(bg_color[1]), int(bg_color[2]), bg_std,
     )
 
-    # Step 2: Periodic tile median modeling
-    bg = _tile_median_model(img, candidate_mask, bg_color, period)
+    # Step 2: Build background — strategy depends on whether we have fg hints
+    has_fg_hint = np.any(fg_hint_mask > 0)
 
-    # Step 3: Inpainting — repair areas where foreground/text was removed
-    inpaint_mask = _build_inpaint_mask(img, bg, exclude, candidate_mask)
-    if np.any(inpaint_mask > 0):
-        bg = _inpaint(bg, inpaint_mask)
+    if has_fg_hint:
+        # Refinement pass: use original image + inpainting for pixel-accurate bg
+        bg = _original_based_background(img, exclude, bg_color)
+    else:
+        # Initial pass: smooth background for foreground detection
+        bg = _smooth_background(img, bg_color, candidate_mask, text_mask)
 
     return bg
 
@@ -131,95 +133,112 @@ def _detect_background(
 
 
 # ---------------------------------------------------------------------------
-# Step 2: Periodic tile median modeling
+# Step 2a: Smooth background for initial foreground detection
 # ---------------------------------------------------------------------------
 
 
-def _tile_median_model(
+def _smooth_background(
     img: np.ndarray,
-    candidate_mask: np.ndarray,
     bg_color: np.ndarray,
-    period: int,
-) -> np.ndarray:
-    """Build background via periodic tile median sampling.
-
-    For each (py, px) position within a period×period tile, collect all
-    candidate pixels at that periodic position and take their median.
-    """
-    h, w, c = img.shape
-    tile = np.zeros((period, period, c), dtype=np.float32)
-
-    for py in range(period):
-        for px in range(period):
-            ys = np.arange(py, h, period)
-            xs = np.arange(px, w, period)
-            yy, xx = np.meshgrid(ys, xs, indexing="ij")
-            pixels = img[yy, xx].reshape(-1, c).astype(np.float32)
-            valid = candidate_mask[yy, xx].reshape(-1)
-
-            if np.any(valid):
-                tile[py, px] = np.median(pixels[valid], axis=0)
-            else:
-                tile[py, px] = bg_color
-
-    # Tile the background
-    # Use np.tile for efficiency instead of per-pixel loop
-    reps_y = (h + period - 1) // period
-    reps_x = (w + period - 1) // period
-    bg = np.tile(tile, (reps_y, reps_x, 1))[:h, :w, :]
-
-    return np.clip(bg, 0, 255).astype(np.uint8)
-
-
-# ---------------------------------------------------------------------------
-# Step 3: Inpainting
-# ---------------------------------------------------------------------------
-
-
-def _build_inpaint_mask(
-    img: np.ndarray,
-    bg: np.ndarray,
-    exclude_mask: np.ndarray,
     candidate_mask: np.ndarray,
+    text_mask: np.ndarray,
 ) -> np.ndarray:
-    """Build a mask of regions that need inpainting.
+    """Build a smooth background for the initial foreground detection pass.
 
-    These are areas where the tile model couldn't get clean background
-    because they were covered by foreground or text.
+    Replaces non-background pixels with bg_color and applies smoothing.
+    This creates enough contrast for diff-based foreground detection while
+    preserving the general background appearance.
+
+    Args:
+        img: Original image (H, W, 3) RGB uint8.
+        bg_color: Detected background color (3,) float.
+        candidate_mask: (H, W) bool — pixels likely belonging to background.
+        text_mask: Binary mask (H, W) uint8 where text regions = 255.
+
+    Returns:
+        Smooth background (H, W, 3) RGB uint8.
     """
-    h, w = img.shape[:2]
+    bg = img.copy()
+    fill = np.clip(bg_color, 0, 255).astype(np.uint8)
 
-    # Regions that are excluded (text/fg) need inpainting in the background
-    # Also regions where the background model differs significantly from
-    # what we'd expect (non-candidate areas)
-    inpaint = exclude_mask.copy()
+    # Replace non-candidate pixels (likely foreground) with bg_color
+    bg[~candidate_mask] = fill
 
-    # Add non-candidate regions that might have foreground residuals
-    non_candidate = (~candidate_mask).astype(np.uint8) * 255
-    # But only where the tile model had to use fallback (bg_color)
-    diff = np.linalg.norm(
-        img.astype(np.float32) - bg.astype(np.float32), axis=2
-    )
-    residual = (diff > 40) & (~candidate_mask)
-    inpaint = np.maximum(inpaint, residual.astype(np.uint8) * 255)
+    # Also replace text regions
+    if text_mask is not None:
+        bg[text_mask > 0] = fill
 
-    # Dilate slightly to cover edges
+    # Smooth to blend transitions and reduce artifacts
+    bg = cv2.GaussianBlur(bg, (21, 21), 0)
+
+    return bg
+
+
+# ---------------------------------------------------------------------------
+# Step 2b: Original-based background with inpainting (refinement pass)
+# ---------------------------------------------------------------------------
+
+
+def _original_based_background(
+    img: np.ndarray,
+    exclude_mask: np.ndarray,
+    bg_color: np.ndarray,
+) -> np.ndarray:
+    """Build background by starting from original image and inpainting excluded regions.
+
+    This preserves the original background pixel-for-pixel in areas without
+    foreground/text, and uses inpainting to fill the excluded regions from
+    surrounding real background pixels.
+
+    Args:
+        img: Original image (H, W, 3) RGB uint8.
+        exclude_mask: Binary mask (H, W) uint8, regions to repair = 255.
+        bg_color: Detected background color (3,) float.
+
+    Returns:
+        Clean background (H, W, 3) RGB uint8.
+    """
+    bg = img.copy()
+
+    # If nothing to repair, return original
+    if not np.any(exclude_mask > 0):
+        return bg
+
+    # Pre-fill excluded regions with bg_color for better inpainting seed
+    fill_color = np.clip(bg_color, 0, 255).astype(np.uint8)
+    bg[exclude_mask > 0] = fill_color
+
+    # Build inpaint mask: excluded regions dilated slightly to cover edges
+    inpaint_mask = _build_inpaint_mask(exclude_mask)
+
+    # Inpaint to blend filled regions with surrounding real background
+    bg = _inpaint(bg, inpaint_mask)
+
+    return bg
+
+
+def _build_inpaint_mask(exclude_mask: np.ndarray) -> np.ndarray:
+    """Build inpaint mask from exclusion mask with slight dilation for edge coverage."""
+    # Dilate to cover boundary artifacts
     kernel = np.ones((5, 5), np.uint8)
-    inpaint = cv2.dilate(inpaint, kernel, iterations=1)
+    inpaint_mask = cv2.dilate(exclude_mask, kernel, iterations=1)
+    return inpaint_mask
 
-    return inpaint
+
+# ---------------------------------------------------------------------------
+# Inpainting
+# ---------------------------------------------------------------------------
 
 
 def _inpaint(bg: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Inpaint masked regions using Telea algorithm."""
+    """Inpaint masked regions using dual-pass approach."""
     bgr = cv2.cvtColor(bg, cv2.COLOR_RGB2BGR)
 
-    # Use larger radius for better fill quality
+    # First pass: Telea algorithm with larger radius for structural fill
     repaired = cv2.inpaint(bgr, mask, inpaintRadius=7, flags=cv2.INPAINT_TELEA)
 
-    # Second pass with NS method for smoother results on large areas
-    large_areas = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=1)
-    repaired = cv2.inpaint(repaired, large_areas, inpaintRadius=5, flags=cv2.INPAINT_NS)
+    # Second pass: NS method for smoother blending on the same regions
+    repaired = cv2.inpaint(repaired, mask, inpaintRadius=5, flags=cv2.INPAINT_NS)
 
     result = cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB)
 

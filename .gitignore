@@ -1,17 +1,10 @@
-# --- Old project patterns ---
+# --- Project patterns ---
 .worktrees/
 .tmp-pytest/
-stage2tmp/
 .pytest_cache/
-pytest-cache-files-*/
 tessdata/
 *_assets/
 verify-main-temp/
-
-# --- ppt-master workspace ---
-projects/*
-!projects/README.md
-exports/
 
 # --- Environment ---
 .env
