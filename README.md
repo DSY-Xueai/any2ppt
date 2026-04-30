@@ -61,9 +61,6 @@ python image_to_ppt.py input.png -o output.pptx
 
 # 调整参数
 python image_to_ppt.py input.png --lang ch --period 32 --diff-threshold 20 --min-area 20
-
-# 添加参考页（第二页放原图对照）
-python image_to_ppt.py input.png --reference
 ```
 
 ### 命令行参数
@@ -76,7 +73,6 @@ python image_to_ppt.py input.png --reference
 | `--period` | `32` | 背景建模瓦片周期 |
 | `--diff-threshold` | `20.0` | 前景检测灵敏度 |
 | `--min-area` | `20` | 最小组件面积（像素） |
-| `--reference` | 关闭 | 添加原图参考页 |
 
 ## 项目结构
 
@@ -102,7 +98,3 @@ python image_to_ppt.py input.png --reference
 - 复杂纹理/渐变背景区域的修复质量有待提升
 - 文本颜色采样在深色背景上可能不够精确
 - 目前主要针对中英文文本优化，其他语言需要额外测试
-
-## License
-
-MIT
