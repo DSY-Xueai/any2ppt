@@ -1,100 +1,256 @@
-# Image-to-PPT Converter
+<div align="center">
 
-将图片转换为可编辑的 PowerPoint 演示文稿。通过计算机视觉和 OCR 技术，自动分离背景、前景组件和文本，生成分层可编辑的 PPTX 文件。
+# any2ppt
 
-## 功能特性
+**图片 → 可编辑 PowerPoint，一键还原分层结构**
 
-- **背景建模与修复**：两轮迭代——平滑背景初检 + 原图 inpainting 精修，非前景区域像素级保留原图
-- **前景提取与拆分**：基于差分 + Canny 边缘检测的前景 mask，连通域拆分为独立透明 PNG 组件
-- **OCR 文本重建**：支持 PaddleOCR（推荐，中文精度更高）和 Tesseract 双引擎，自动估计字号、颜色、粗体
-- **分层 PPTX 组装**：背景层 + 前景组件层 + 文本框层，每个元素独立可编辑
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)]()
 
-## 效果示意
+</div>
+
+> 拿到一张 PPT 截图或设计稿，想还原成可编辑的 PowerPoint？手动重做太慢，OCR 只能提文字。
+> **any2ppt** 通过计算机视觉 + OCR，自动将图片拆解为背景、前景组件、文本三层，生成真正可编辑的 PPTX。
+
+---
+
+## 效果演示
 
 ```
-输入图片 ──→ [OCR 文本检测] ──→ [背景建模] ──→ [前景提取] ──→ 可编辑 PPTX
-                                                                  ├── 背景图层
-                                                                  ├── 前景组件（独立 PNG）
-                                                                  └── 文本框（可编辑文字）
+┌─────────────┐         ┌──────────────────────────────────────────┐
+│             │         │  可编辑 PPTX                              │
+│  输入图片    │  ────►  │  ├── 背景图层（修复后的完整背景）          │
+│  (截图/设计稿)│         │  ├── 前景组件层（独立可移动的透明 PNG）    │
+│             │         │  └── 文本框层（可编辑文字，保留样式）       │
+└─────────────┘         └──────────────────────────────────────────┘
 ```
+
+### 输入 vs 输出
+
+| 输入图片 | 输出 PPT（分层可编辑） |
+|:---:|:---:|
+| ![input](test-image/1-1-1-1png.png) | 背景 + 19 个独立组件 + 5 个文本框 |
+| ![input](test-image/2-2.png) | 背景 + 32 个独立组件 + 7 个文本框 |
+| ![input](test-image/3-3.png) | 背景 + 17 个独立组件 + 10 个文本框 |
+
+> 输出的 PPTX 中，每个前景元素都是独立图层，可自由拖动、缩放、删除；文本框可直接编辑文字内容。
+
+---
+
+## 核心特性
+
+| 特性 | 说明 |
+|------|------|
+| **智能背景修复** | 两轮迭代建模：平滑背景初检 + 原图 inpainting 精修，非前景区域像素级保留 |
+| **前景组件拆分** | 差分 + Canny 边缘检测 + 连通域分析，每个元素输出为独立透明 PNG |
+| **OCR 文本重建** | PaddleOCR / Tesseract 双引擎，自动估计字号、颜色、粗体、对齐方式 |
+| **分层 PPTX 组装** | 背景层 + 前景组件层 + 文本框层，完全可编辑 |
+| **批量处理** | 多张图片或整个目录一次性转换为多页 PPTX |
+| **Skill 包** | 可作为独立 skill 分发，别人拿到即可直接使用 |
+
+---
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.9+
-- OCR 引擎至少安装一个（见下方说明）
+- OCR 引擎至少安装一个（见下方）
 
-### 安装依赖
+### 安装
 
 ```bash
+git clone https://github.com/DSY-Xueai/any2ppt.git
+cd any2ppt
 pip install -r requirements.txt
 ```
 
-### OCR 引擎配置
+### OCR 引擎
 
-**方式 A：PaddleOCR（推荐，中文识别更准）**
+**方式 A：PaddleOCR（推荐，中文识别精度更高）**
 
 ```bash
 pip install paddleocr paddlepaddle
 ```
 
-**方式 B：Tesseract（更轻量，需系统级安装）**
+**方式 B：Tesseract（更轻量）**
 
 ```bash
 pip install pytesseract
+# 系统安装 Tesseract：
+# Windows: https://github.com/UB-Mannheim/tesseract/wiki
+# macOS:   brew install tesseract
+# Ubuntu:  sudo apt install tesseract-ocr tesseract-ocr-chi-sim
 ```
 
-系统安装 Tesseract：
-- Windows: https://github.com/UB-Mannheim/tesseract/wiki
-- macOS: `brew install tesseract`
-- Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-chi-sim`
+---
 
-### 使用方法
+## 使用方法
+
+### 命令行
 
 ```bash
-# 基本用法
+# 单张图片
 python image_to_ppt.py input.png
 
-# 指定输出路径
+# 指定输出
 python image_to_ppt.py input.png -o output.pptx
 
+# 多张图片 → 一个多页 PPTX
+python image_to_ppt.py img1.png img2.png img3.png -o slides.pptx
+
+# 传入目录（自动扫描所有图片）
+python image_to_ppt.py ./my_slides/ -o presentation.pptx
+
 # 调整参数
-python image_to_ppt.py input.png --lang ch --period 32 --diff-threshold 20 --min-area 20
+python image_to_ppt.py input.png --lang en --diff-threshold 15 --min-area 30
 ```
 
-### 命令行参数
+### Python API
+
+```python
+from image_to_ppt import convert, convert_batch
+
+# 单张图片
+result = convert("input.png", output_path="output.pptx")
+
+# 多张图片
+result = convert_batch(
+    ["img1.png", "img2.png", "img3.png"],
+    output_path="slides.pptx",
+)
+```
+
+### 参数说明
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `image` | (必填) | 输入图片路径（PNG、JPG 等） |
-| `-o, --output` | 与输入同名 .pptx | 输出 PPTX 路径 |
-| `--lang` | `ch` | OCR 语言代码 |
-| `--period` | `32` | 背景建模瓦片周期 |
-| `--diff-threshold` | `20.0` | 前景检测灵敏度 |
+| `images` | （必填） | 图片文件、多个文件、或目录路径 |
+| `-o, --output` | 首张图片同名.pptx | 输出路径 |
+| `--lang` | `ch` | OCR 语言（ch / en） |
+| `--period` | `32` | 背景建模周期 |
+| `--diff-threshold` | `20.0` | 前景检测灵敏度（越小越敏感） |
 | `--min-area` | `20` | 最小组件面积（像素） |
+| `--reference` | 不启用 | 每页后附加原图参考 slide |
+
+---
+
+## 工作原理
+
+```
+输入图片
+  │
+  ▼
+┌─────────────────┐
+│  OCR 文本检测    │  PaddleOCR / Tesseract
+│  字号·颜色·粗体  │  自动样式估计
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  背景建模（两轮） │  第一轮：平滑背景 → 初始前景检测
+│                  │  第二轮：原图 + inpainting 精修
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  前景提取与拆分   │  diff + Canny 边缘 + 连通域分析
+│                  │  每个组件 → 独立透明 PNG
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  PPTX 分层组装   │  背景层 + 组件层 + 文本框层
+└────────┬────────┘
+         │
+         ▼
+    输出 .pptx
+```
+
+---
 
 ## 项目结构
 
 ```
-├── image_to_ppt.py     # 主入口（CLI + 管线编排）
-├── text_detect.py      # 文本检测（PaddleOCR / Tesseract + 样式估计）
-├── bg_model.py         # 背景建模（平滑初检 + inpainting 精修）
-├── fg_extract.py       # 前景提取（差分 + 边缘检测 + 连通域拆分）
-├── ppt_assemble.py     # PPTX 组装（背景 + 组件 + 文本框分层）
-├── requirements.txt    # Python 依赖
-├── .env.example        # 环境变量配置示例
-└── docs/               # 设计文档与开发计划
+any2ppt/
+├── image_to_ppt.py        # 主入口（CLI + 管线编排）
+├── text_detect.py         # 文本检测（OCR + 样式估计）
+├── bg_model.py            # 背景建模（平滑初检 + inpainting 精修）
+├── fg_extract.py          # 前景提取（差分 + 边缘检测 + 连通域拆分）
+├── ppt_assemble.py        # PPTX 组装（分层构建）
+├── requirements.txt       # 依赖清单
+├── test-image/            # 测试图片
+└── skills/
+    └── image-to-ppt/      # 可分发的 Skill 包
+        ├── SKILL.md
+        ├── scripts/       # 完整源码副本
+        └── references/    # 依赖说明
 ```
+
+---
+
+## Skill 包
+
+项目已封装为独立可分发的 Skill，位于 `skills/image-to-ppt/`。
+
+将该文件夹发送给他人，对方只需：
+
+```bash
+cd skills/image-to-ppt
+pip install -r references/requirements.txt
+python scripts/image_to_ppt.py input.png
+```
+
+即可直接使用全部功能，无需克隆整个仓库。
+
+---
 
 ## 技术栈
 
-- **图像处理**：OpenCV、Pillow、NumPy
-- **OCR**：PaddleOCR / Tesseract
-- **PPT 生成**：python-pptx
+| 领域 | 技术 |
+|------|------|
+| 图像处理 | OpenCV, Pillow, NumPy |
+| OCR | PaddleOCR, Tesseract |
+| PPT 生成 | python-pptx |
+| 背景修复 | OpenCV Inpainting (Telea / NS) |
+| 前景检测 | 差分阈值 + Canny 边缘 + 形态学运算 |
+
+---
 
 ## 已知限制
 
-- 复杂纹理/渐变背景区域的修复质量有待提升
-- 文本颜色采样在深色背景上可能不够精确
-- 目前主要针对中英文文本优化，其他语言需要额外测试
+- 复杂纹理/渐变背景的修复质量有待提升
+- 文本颜色基于采样估计，极端配色场景可能偏差
+- 目前主要针对中英文优化，其他语言需额外测试
+- 多图模式下 slide 尺寸以首张图片宽高比为基准
+
+---
+
+## 支持的图片格式
+
+PNG · JPG / JPEG · BMP · TIFF / TIF · WebP
+
+---
+
+## 更新日志
+
+| 日期 | 说明 |
+|------|------|
+| 2025/05 | 支持多图批量处理，多张图片合并为一个多页 PPTX |
+| 2025/05 | 封装为可分发 Skill 包 |
+| 2025/05 | 前景拆分修复：Canny 边缘辅助 + 边缘伪影过滤 |
+| 2025/05 | 背景建模重写：两轮迭代，非前景区域像素级保留原图 |
+| 2025/05 | 首次发布：单图转可编辑 PPT |
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#DSY-Xueai/any2ppt&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DSY-Xueai/any2ppt&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DSY-Xueai/any2ppt&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=DSY-Xueai/any2ppt&type=Date" />
+  </picture>
+</a>
