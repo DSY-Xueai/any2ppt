@@ -26,10 +26,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from bg_model import build_background
-from fg_extract import extract_foreground_mask, split_components
-from ppt_assemble import assemble_pptx, assemble_pptx_multi
-from text_detect import detect_text
+from scripts.bg_model import build_background
+from scripts.fg_extract import extract_foreground_mask, split_components
+from scripts.ppt_assemble import assemble_pptx, assemble_pptx_multi
+from scripts.text_detect import detect_text
 
 logger = logging.getLogger(__name__)
 

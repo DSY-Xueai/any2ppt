@@ -174,17 +174,20 @@ result = convert_batch(
 ```
 any2ppt/
 ├── image_to_ppt.py        # 主入口（CLI + 管线编排）
-├── text_detect.py         # 文本检测（OCR + 样式估计）
-├── bg_model.py            # 背景建模（平滑初检 + inpainting 精修）
-├── fg_extract.py          # 前景提取（差分 + 边缘检测 + 连通域拆分）
-├── ppt_assemble.py        # PPTX 组装（分层构建）
-├── requirements.txt       # 依赖清单
+├── scripts/               # 核心模块包
+│   ├── __init__.py
+│   ├── text_detect.py     # 文本检测（OCR + 样式估计）
+│   ├── bg_model.py        # 背景建模（平滑初检 + inpainting 精修）
+│   ├── fg_extract.py      # 前景提取（差分 + 边缘检测 + 连通域拆分）
+│   └── ppt_assemble.py    # PPTX 组装（分层构建）
+├── skills/
+│   └── image-to-ppt/      # 可分发的 Skill 包
+│       ├── SKILL.md
+│       ├── scripts/       # 完整源码副本
+│       └── references/    # 依赖说明
 ├── test-image/            # 测试图片
-└── skills/
-    └── image-to-ppt/      # 可分发的 Skill 包
-        ├── SKILL.md
-        ├── scripts/       # 完整源码副本
-        └── references/    # 依赖说明
+├── requirements.txt       # 依赖清单
+└── .env.example           # 环境变量示例
 ```
 
 ---

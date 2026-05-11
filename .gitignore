@@ -8,6 +8,7 @@ tessdata/
 verify-main-temp/
 test_output_files/
 Course.md
+docs/
 
 # --- Environment ---
 .env
