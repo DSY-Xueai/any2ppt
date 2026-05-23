@@ -83,13 +83,15 @@ def detect_text(
         if style["font_size"] < 8.0:
             continue
 
+        text = rb["text"]
+        font_size = _adjust_font_size(text, style["font_size"])
         text_items.append({
             "box": list(box),
-            "text": rb["text"],
-            "font_size": style["font_size"],
+            "text": text,
+            "font_size": font_size,
             "color": style["color"],
-            "bold": style["bold"],
-            "font": "Microsoft YaHei",
+            "bold": False if _should_force_regular_weight(text, font_size) else style["bold"],
+            "font": _select_font(text, font_size),
             "align": 1,  # default center; refined below
             "confidence": rb["confidence"],
         })
@@ -117,7 +119,7 @@ def _ocr_detect(
     if results is not None:
         return results
 
-    results = _try_tesseract(image_path, conf_threshold)
+    results = _try_tesseract(image_path, conf_threshold, lang=lang)
     if results is not None:
         return results
 
@@ -223,7 +225,7 @@ def _patch_paddle_mkldnn() -> None:
 
 
 def _try_tesseract(
-    image_path: Path, conf_threshold: float
+    image_path: Path, conf_threshold: float, lang: str = "ch"
 ) -> list[dict] | None:
     """Detect text with pytesseract at line level. Returns None if unavailable.
 
@@ -242,9 +244,10 @@ def _try_tesseract(
         if tesseract_path.exists():
             pytesseract.pytesseract.tesseract_cmd = str(tesseract_path)
 
+        tess_lang = _to_tesseract_lang(lang)
         img = Image.open(image_path)
         data = pytesseract.image_to_data(
-            img, lang="chi_sim+eng", output_type=pytesseract.Output.DICT
+            img, lang=tess_lang, output_type=pytesseract.Output.DICT
         )
 
         # Group words by (block, paragraph, line)
@@ -310,6 +313,15 @@ def _try_tesseract(
         return None
 
 
+def _to_tesseract_lang(lang: str) -> str:
+    """Map public OCR language names to Tesseract language packs."""
+    if lang in {"ch", "zh", "cn"}:
+        return "chi_sim+eng"
+    if lang == "en":
+        return "eng"
+    return lang
+
+
 # ---------------------------------------------------------------------------
 # Noise filtering
 # ---------------------------------------------------------------------------
@@ -351,13 +363,14 @@ def _filter_noise(boxes: list[dict]) -> list[dict]:
         if len(text) == 1 and not text.isalnum() and not ('\u4e00' <= text <= '\u9fff'):
             continue
 
-        # Skip garbled text: mostly uppercase with colons/dots but no real words
+        # Skip garbled text: mostly uppercase with separators, e.g.
         # e.g. "MCOULE ST:SETMP", "NOOOLE SX.TEET"
         alpha_chars = [c for c in text if c.isalpha()]
         if len(alpha_chars) >= 4:
             upper_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
             has_cjk = any('\u4e00' <= c <= '\u9fff' for c in text)
-            if upper_ratio > 0.8 and not has_cjk:
+            has_garbled_separator = any(c in text for c in ":;./\\")
+            if upper_ratio > 0.8 and has_garbled_separator and not has_cjk:
                 continue
 
         filtered.append(b)
@@ -411,6 +424,31 @@ def _estimate_style(img_rgb: np.ndarray, box: tuple) -> dict:
     bold = _estimate_bold(region)
 
     return {"font_size": round(font_size, 1), "color": color_hex, "bold": bold}
+
+
+def _select_font(text: str, font_size: float) -> str:
+    """Choose an editable font that better matches common Chinese slide styles."""
+    if _has_cjk(text) and font_size >= 36.0:
+        return "华文行楷"
+    return "Microsoft YaHei"
+
+
+def _adjust_font_size(text: str, font_size: float) -> float:
+    """Constrain large Chinese title text so editable text does not wrap."""
+    if _has_cjk(text) and font_size >= 80.0:
+        return round(font_size * 0.88, 1)
+    if _has_cjk(text) and font_size >= 48.0:
+        return round(font_size * 0.90, 1)
+    return font_size
+
+
+def _should_force_regular_weight(text: str, font_size: float) -> bool:
+    """Avoid synthetic bold on calligraphy fonts."""
+    return _has_cjk(text) and font_size >= 36.0
+
+
+def _has_cjk(text: str) -> bool:
+    return any('\u4e00' <= c <= '\u9fff' for c in text)
 
 
 def _sample_text_color(region: np.ndarray) -> str:

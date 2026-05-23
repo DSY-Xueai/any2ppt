@@ -18,6 +18,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
 logger = logging.getLogger(__name__)
@@ -241,7 +242,7 @@ def _add_textbox(
 
     box = slide.shapes.add_textbox(left, top, width, height)
     tf = box.text_frame
-    tf.word_wrap = True
+    tf.word_wrap = False
     tf.clear()
 
     p = tf.paragraphs[0]
@@ -249,7 +250,7 @@ def _add_textbox(
     run.text = item.get("text", "")
 
     font = run.font
-    font.name = item.get("font", "Microsoft YaHei")
+    _set_run_font(run, item.get("font", "Microsoft YaHei"))
     font.size = Pt(item.get("font_size", 12))
     font.bold = item.get("bold", False)
 
@@ -260,3 +261,11 @@ def _add_textbox(
     from pptx.enum.text import PP_ALIGN
     align_map = {0: PP_ALIGN.LEFT, 1: PP_ALIGN.CENTER, 2: PP_ALIGN.RIGHT}
     p.alignment = align_map.get(item.get("align", 1), PP_ALIGN.CENTER)
+
+
+def _set_run_font(run, font_name: str) -> None:
+    """Set both Latin and East Asian font names for PowerPoint."""
+    run.font.name = font_name
+    rpr = run._r.get_or_add_rPr()
+    rpr.set(qn("a:latin"), font_name)
+    rpr.set(qn("a:ea"), font_name)

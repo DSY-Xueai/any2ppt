@@ -94,7 +94,18 @@ def extract_foreground_mask(
     edge_fg = (edges_dilated > 0) & (color_dist > diff_threshold * 0.5)
 
     # === Combine all methods ===
-    mask = color_mask | diff_mask | sat_mask | bright_mask | edge_fg
+    detector_masks = [color_mask, diff_mask, sat_mask, bright_mask, edge_fg]
+    detector_masks = [
+        m for m in detector_masks
+        if _keep_detector_mask(
+            nonzero_pixels=int(np.count_nonzero(m)),
+            total_pixels=h * w,
+        )
+    ]
+    if detector_masks:
+        mask = np.logical_or.reduce(detector_masks)
+    else:
+        mask = edge_fg
 
     # Exclude text regions — text will be rebuilt as editable text boxes
     if text_mask is not None:
@@ -119,6 +130,17 @@ def extract_foreground_mask(
         np.count_nonzero(mask) / (h * w) * 100,
     )
     return mask
+
+
+def _keep_detector_mask(
+    nonzero_pixels: int,
+    total_pixels: int,
+    max_mask_ratio: float = 0.45,
+) -> bool:
+    """Reject detector masks that classify most of the slide as foreground."""
+    if total_pixels <= 0:
+        return False
+    return nonzero_pixels / total_pixels <= max_mask_ratio
 
 
 def split_components(

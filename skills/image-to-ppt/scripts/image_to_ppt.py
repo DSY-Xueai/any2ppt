@@ -304,7 +304,7 @@ def main() -> None:
         help="Minimum component area in pixels (default: 20)"
     )
     parser.add_argument(
-        "--no-reference", action="store_true", default=True,
+        "--no-reference", action="store_true", default=False,
         help="Do not add reference slide with original image (default: no reference)"
     )
     parser.add_argument(
@@ -313,6 +313,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    add_reference = _parse_reference_option(args.reference, args.no_reference)
 
     logging.basicConfig(
         level=logging.INFO,
@@ -335,7 +336,7 @@ def main() -> None:
             bg_period=args.period,
             diff_threshold=args.diff_threshold,
             min_component_area=args.min_area,
-            add_reference=args.reference,
+            add_reference=add_reference,
         )
     else:
         # Multiple images: batch into one PPTX
@@ -346,8 +347,15 @@ def main() -> None:
             bg_period=args.period,
             diff_threshold=args.diff_threshold,
             min_component_area=args.min_area,
-            add_reference=args.reference,
+            add_reference=add_reference,
         )
+
+
+def _parse_reference_option(reference: bool, no_reference: bool) -> bool:
+    """Resolve reference-slide flags; explicit --no-reference wins."""
+    if no_reference:
+        return False
+    return bool(reference)
 
 
 def _resolve_inputs(inputs: list[str]) -> list[Path]:

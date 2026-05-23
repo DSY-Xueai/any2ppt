@@ -48,6 +48,12 @@ def build_background(
         text_mask = np.zeros((h, w), dtype=np.uint8)
     if fg_hint_mask is None:
         fg_hint_mask = np.zeros((h, w), dtype=np.uint8)
+    elif not _should_use_fg_hint(
+        nonzero_pixels=int(np.count_nonzero(fg_hint_mask)),
+        total_pixels=h * w,
+    ):
+        logger.warning("Ignoring oversized foreground hint for background refinement.")
+        fg_hint_mask = np.zeros((h, w), dtype=np.uint8)
 
     # Combined exclusion mask
     exclude = ((text_mask > 0) | (fg_hint_mask > 0)).astype(np.uint8) * 255
@@ -70,6 +76,17 @@ def build_background(
         bg = _smooth_background(img, bg_color, candidate_mask, text_mask)
 
     return bg
+
+
+def _should_use_fg_hint(
+    nonzero_pixels: int,
+    total_pixels: int,
+    max_foreground_ratio: float = 0.45,
+) -> bool:
+    """Reject failed foreground hints that cover too much of the slide."""
+    if total_pixels <= 0:
+        return False
+    return nonzero_pixels / total_pixels <= max_foreground_ratio
 
 
 # ---------------------------------------------------------------------------
