@@ -177,6 +177,8 @@ result = convert_batch(
 
 ```
 any2ppt/
+├── .claude-plugin/
+│   └── plugin.json        # Claude Code plugin 配置
 ├── image_to_ppt.py        # 主入口（CLI + 管线编排）
 ├── scripts/               # 核心模块包
 │   ├── __init__.py
@@ -194,9 +196,40 @@ any2ppt/
 
 ---
 
-## Skill 包
+## skills 安装
 
 项目已封装为独立可分发的 Skill，位于 `skills/image-to-ppt/`。
+
+### 方式一：使用 skills CLI
+
+```bash
+npx skills add DSY-Xueai/any2ppt --skill image-to-ppt
+```
+
+### 方式二：让 Agent 自动安装
+
+把下面这段话发给支持安装 Skills 的 Agent：
+
+```text
+请从 https://github.com/DSY-Xueai/any2ppt 安装 image-to-ppt skill。
+```
+
+### 方式三：Claude Code plugin
+
+```bash
+claude plugin marketplace add https://github.com/DSY-Xueai/any2ppt
+claude plugin install any2ppt@any2ppt --scope user
+```
+
+### 方式四：手动安装
+
+```bash
+git clone https://github.com/DSY-Xueai/any2ppt.git
+mkdir -p ~/.claude/skills
+cp -R any2ppt/skills/image-to-ppt ~/.claude/skills/image-to-ppt
+```
+
+手动安装到其他 Agent 时，把 `skills/image-to-ppt/` 复制到对应的本地 skills 目录即可。
 
 ---
 
