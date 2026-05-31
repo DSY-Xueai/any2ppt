@@ -233,6 +233,9 @@ def _original_based_background(
         bg = _fill_text_regions(bg, text_mask)
 
     repair_mask = fg_mask if fg_mask is not None else exclude_mask
+    if fg_mask is not None:
+        bg = _replace_unrecoverable_large_regions(bg, fg_mask, bg_color)
+        repair_mask = _build_component_repair_mask(fg_mask)
     if not np.any(repair_mask > 0):
         return bg
 
@@ -252,6 +255,235 @@ def _original_based_background(
 def _build_inpaint_mask(exclude_mask: np.ndarray) -> np.ndarray:
     """Build inpaint mask from the exact exclusion mask."""
     return exclude_mask.copy()
+
+
+def _build_component_repair_mask(fg_mask: np.ndarray) -> np.ndarray:
+    """Build a repair mask that also covers small component shadows."""
+    repair_mask = np.zeros_like(fg_mask)
+    safe_mask = _mask_for_destructive_repair(fg_mask)
+    total_area = max(int(fg_mask.shape[0] * fg_mask.shape[1]), 1)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (safe_mask > 0).astype(np.uint8), connectivity=8
+    )
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        x = int(stats[i, cv2.CC_STAT_LEFT])
+        y = int(stats[i, cv2.CC_STAT_TOP])
+        bw = int(stats[i, cv2.CC_STAT_WIDTH])
+        bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+        if _is_unrecoverable_large_region(area, bw, bh, total_area):
+            continue
+
+        repair_mask[labels == i] = 255
+        if not _should_expand_shadow_halo(bw, bh, fg_mask.shape):
+            continue
+
+        pad = max(2, min(10, max(bw, bh) // 8))
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(fg_mask.shape[1], x + bw + pad)
+        y2 = min(fg_mask.shape[0], y + bh + pad)
+        repair_mask[y1:y2, x1:x2] = np.maximum(
+            repair_mask[y1:y2, x1:x2],
+            cv2.dilate(
+                (labels[y1:y2, x1:x2] == i).astype(np.uint8) * 255,
+                np.ones((pad * 2 + 1, pad * 2 + 1), np.uint8),
+                iterations=1,
+            ),
+        )
+
+    return repair_mask
+
+
+def _should_expand_shadow_halo(
+    width: int,
+    height: int,
+    mask_shape: tuple[int, int],
+    max_bbox_area_ratio: float = 0.08,
+    max_width_ratio: float = 0.25,
+    max_height_ratio: float = 0.30,
+) -> bool:
+    """Only expand repair for compact objects likely to have drop shadows."""
+    img_h, img_w = mask_shape
+    total_area = max(img_h * img_w, 1)
+    return (
+        width * height / total_area <= max_bbox_area_ratio
+        and width / max(img_w, 1) <= max_width_ratio
+        and height / max(img_h, 1) <= max_height_ratio
+    )
+
+
+def _mask_for_destructive_repair(fg_mask: np.ndarray) -> np.ndarray:
+    """Keep only foreground regions that are small enough to repair safely."""
+    repair_mask = fg_mask.copy()
+    total_area = max(int(fg_mask.shape[0] * fg_mask.shape[1]), 1)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (fg_mask > 0).astype(np.uint8), connectivity=8
+    )
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        bw = int(stats[i, cv2.CC_STAT_WIDTH])
+        bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+        if _is_unrecoverable_large_region(area, bw, bh, total_area):
+            repair_mask[labels == i] = 0
+
+    return repair_mask
+
+
+def _replace_unrecoverable_large_regions(
+    bg: np.ndarray,
+    fg_mask: np.ndarray,
+    bg_color: np.ndarray,
+) -> np.ndarray:
+    """Replace foreground bboxes that are unlikely to reveal true hidden pixels."""
+    output = bg.copy()
+    total_area = max(int(fg_mask.shape[0] * fg_mask.shape[1]), 1)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (fg_mask > 0).astype(np.uint8), connectivity=8
+    )
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        x = int(stats[i, cv2.CC_STAT_LEFT])
+        y = int(stats[i, cv2.CC_STAT_TOP])
+        bw = int(stats[i, cv2.CC_STAT_WIDTH])
+        bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+        if not _should_replace_region_bbox(area, bw, bh, total_area):
+            continue
+
+        pad = max(2, min(10, max(bw, bh) // 16))
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(fg_mask.shape[1], x + bw + pad)
+        y2 = min(fg_mask.shape[0], y + bh + pad)
+        fill = _fill_region_from_low_frequency_context(
+            output, fg_mask, x1, y1, x2 - x1, y2 - y1, bg_color
+        )
+        output[y1:y2, x1:x2] = fill
+
+    return output
+
+
+def _should_replace_region_bbox(
+    area: int,
+    width: int,
+    height: int,
+    total_area: int,
+    min_dense_fill_ratio: float = 0.18,
+    max_dense_bbox_ratio: float = 0.12,
+) -> bool:
+    """Choose regions where bbox fill is more stable than local inpaint."""
+    bbox_area = max(width * height, 1)
+    if _is_unrecoverable_large_region(area, width, height, total_area):
+        return True
+    return (
+        bbox_area / max(total_area, 1) <= max_dense_bbox_ratio
+        and area / bbox_area >= min_dense_fill_ratio
+    )
+
+
+def _sample_large_region_fill(
+    img: np.ndarray,
+    fg_mask: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    bg_color: np.ndarray,
+) -> np.ndarray:
+    """Estimate a clean fill color from the ring around a large region."""
+    h, w = fg_mask.shape
+    pad = max(12, min(80, max(width, height) // 12))
+    sx1 = max(0, x - pad)
+    sy1 = max(0, y - pad)
+    sx2 = min(w, x + width + pad)
+    sy2 = min(h, y + height + pad)
+
+    ring = np.zeros((sy2 - sy1, sx2 - sx1), dtype=bool)
+    ring[:, :] = True
+    ring[
+        y - sy1:y + height - sy1,
+        x - sx1:x + width - sx1,
+    ] = False
+    ring &= fg_mask[sy1:sy2, sx1:sx2] == 0
+
+    pixels = img[sy1:sy2, sx1:sx2][ring]
+    if len(pixels) < 20:
+        fill = bg_color
+    else:
+        fill = np.median(pixels.reshape(-1, 3), axis=0)
+    return np.clip(fill, 0, 255).astype(np.uint8)
+
+
+def _fill_region_from_low_frequency_context(
+    img: np.ndarray,
+    fg_mask: np.ndarray,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    bg_color: np.ndarray,
+) -> np.ndarray:
+    """Fill a hidden region from low-frequency local context."""
+    h, w = fg_mask.shape
+    context = max(20, min(180, max(width, height) // 2))
+    sx1 = max(0, x - context)
+    sy1 = max(0, y - context)
+    sx2 = min(w, x + width + context)
+    sy2 = min(h, y + height + context)
+
+    roi = img[sy1:sy2, sx1:sx2].copy()
+    if roi.size == 0:
+        fill = np.clip(bg_color, 0, 255).astype(np.uint8)
+        return np.tile(fill, (height, width, 1))
+
+    mask = np.zeros((sy2 - sy1, sx2 - sx1), dtype=np.uint8)
+    mask[y - sy1:y + height - sy1, x - sx1:x + width - sx1] = 255
+
+    max_dim = max(roi.shape[:2])
+    scale = min(1.0, 220.0 / max(max_dim, 1))
+    if scale < 1.0:
+        small_size = (
+            max(1, int(roi.shape[1] * scale)),
+            max(1, int(roi.shape[0] * scale)),
+        )
+        small_roi = cv2.resize(roi, small_size, interpolation=cv2.INTER_AREA)
+        small_mask = cv2.resize(mask, small_size, interpolation=cv2.INTER_NEAREST)
+    else:
+        small_roi = roi
+        small_mask = mask
+
+    repaired = cv2.inpaint(
+        cv2.cvtColor(small_roi, cv2.COLOR_RGB2BGR),
+        small_mask,
+        inpaintRadius=5,
+        flags=cv2.INPAINT_TELEA,
+    )
+    repaired = cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB)
+    if scale < 1.0:
+        repaired = cv2.resize(
+            repaired, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_CUBIC
+        )
+
+    return repaired[y - sy1:y + height - sy1, x - sx1:x + width - sx1]
+
+
+def _is_unrecoverable_large_region(
+    area: int,
+    width: int,
+    height: int,
+    total_area: int,
+    min_bbox_area_ratio: float = 0.12,
+    min_fill_ratio: float = 0.30,
+) -> bool:
+    """Identify large dense regions where local inpainting leaves visible scars."""
+    bbox_area = max(width * height, 1)
+    return (
+        bbox_area / max(total_area, 1) >= min_bbox_area_ratio
+        and area / bbox_area >= min_fill_ratio
+    )
 
 
 def _fill_text_regions(img: np.ndarray, text_mask: np.ndarray) -> np.ndarray:

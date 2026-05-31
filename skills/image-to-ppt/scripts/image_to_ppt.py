@@ -103,9 +103,10 @@ def convert(
     )
 
     # Re-extract foreground with improved background
-    fg_mask = extract_foreground_mask(
+    refined_fg_mask = extract_foreground_mask(
         img, bg, text_mask, diff_threshold=diff_threshold
     )
+    fg_mask = _merge_foreground_masks(fg_mask, refined_fg_mask)
 
     # Split into components
     work_dir = tempfile.mkdtemp(prefix="img2ppt_")
@@ -212,9 +213,10 @@ def convert_batch(
         bg = build_background(
             img, text_mask=text_mask, fg_hint_mask=fg_mask, period=bg_period
         )
-        fg_mask = extract_foreground_mask(
+        refined_fg_mask = extract_foreground_mask(
             img, bg, text_mask, diff_threshold=diff_threshold
         )
+        fg_mask = _merge_foreground_masks(fg_mask, refined_fg_mask)
 
         # Split components
         work_dir = tempfile.mkdtemp(prefix=f"img2ppt_{i}_")
@@ -356,6 +358,37 @@ def _parse_reference_option(reference: bool, no_reference: bool) -> bool:
     if no_reference:
         return False
     return bool(reference)
+
+
+def _merge_foreground_masks(
+    initial_mask: np.ndarray,
+    refined_mask: np.ndarray,
+) -> np.ndarray:
+    """Restore reliable components lost during background refinement."""
+    merged = refined_mask.copy()
+    total_area = max(int(initial_mask.shape[0] * initial_mask.shape[1]), 1)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (initial_mask > 0).astype(np.uint8), connectivity=8
+    )
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        x = int(stats[i, cv2.CC_STAT_LEFT])
+        y = int(stats[i, cv2.CC_STAT_TOP])
+        w = int(stats[i, cv2.CC_STAT_WIDTH])
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        bbox_area = max(w * h, 1)
+        bbox_ratio = bbox_area / total_area
+        fill_ratio = area / bbox_area
+
+        if bbox_ratio > 0.12 and fill_ratio < 0.30:
+            continue
+
+        component = labels == i
+        if np.count_nonzero(refined_mask[component]) == 0:
+            merged[component] = 255
+
+    return merged
 
 
 def _resolve_inputs(inputs: list[str]) -> list[Path]:

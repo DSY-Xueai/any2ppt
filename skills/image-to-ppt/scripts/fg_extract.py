@@ -210,11 +210,31 @@ def split_components(
 
     for i in range(1, num_labels + 1):
         label_bool = label_map == i
+        label_area = int(np.count_nonzero(label_bool))
+        label_ys, label_xs = np.where(label_bool)
+        if len(label_ys) == 0:
+            continue
+        label_x_min, label_x_max = int(label_xs.min()), int(label_xs.max())
+        label_y_min, label_y_max = int(label_ys.min()), int(label_ys.max())
+        label_w = label_x_max - label_x_min + 1
+        label_h = label_y_max - label_y_min + 1
+
         original_bool = label_bool & (fg_mask > 0)
         repair_bool = _find_component_text_repairs(
             original_bool, component_text_ink_mask
         )
-        comp_mask_full = (original_bool | repair_bool).astype(np.uint8) * 255
+
+        if _should_use_solid_bbox_alpha(
+            label_area, label_w, label_h, img_h * img_w
+        ):
+            solid_bool = np.zeros_like(label_bool)
+            solid_bool[
+                label_y_min:label_y_max + 1,
+                label_x_min:label_x_max + 1,
+            ] = True
+            comp_mask_full = (solid_bool | repair_bool).astype(np.uint8) * 255
+        else:
+            comp_mask_full = (original_bool | repair_bool).astype(np.uint8) * 255
         area = int(np.count_nonzero(comp_mask_full))
 
         if area < min_area:
@@ -296,6 +316,22 @@ def _build_component_grouping_mask(fg_mask: np.ndarray) -> np.ndarray:
     """Close narrow text-shaped gaps only for component grouping."""
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
     return cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+
+def _should_use_solid_bbox_alpha(
+    area: int,
+    width: int,
+    height: int,
+    total_area: int,
+    min_bbox_area_ratio: float = 0.12,
+    min_fill_ratio: float = 0.30,
+) -> bool:
+    """Use a solid crop for large image-like regions with unreliable holes."""
+    bbox_area = max(width * height, 1)
+    return (
+        bbox_area / max(total_area, 1) >= min_bbox_area_ratio
+        and area / bbox_area >= min_fill_ratio
+    )
 
 
 def _find_component_text_repairs(
@@ -454,7 +490,7 @@ def _remove_noise(
         bbox_area = max(w * h, 1)
         fill_ratio = area / bbox_area
         is_full_span = (h >= img_h * 0.8) or (w >= img_w * 0.8)
-        if is_full_span and fill_ratio < 0.15:
+        if is_full_span and fill_ratio < 0.30:
             continue
 
         clean[labels == i] = 255
