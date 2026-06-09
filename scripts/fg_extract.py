@@ -416,17 +416,7 @@ def _build_text_ink_mask(img: np.ndarray, text_mask: np.ndarray) -> np.ndarray:
         thresh, _ = cv2.threshold(
             region, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
-        border = np.concatenate([
-            region[0, :], region[-1, :], region[:, 0], region[:, -1]
-        ]).astype(np.float32)
-
-        border_mean = float(np.mean(border))
-        if border_mean > float(thresh):
-            cutoff = max(float(thresh), border_mean - 25.0)
-            ink = region <= cutoff
-        else:
-            cutoff = min(float(thresh), border_mean + 25.0)
-            ink = region >= cutoff
+        ink = _select_text_ink(region, float(thresh))
 
         ink_uint8 = ink.astype(np.uint8) * 255
         ink_uint8 = cv2.dilate(ink_uint8, np.ones((3, 3), np.uint8), iterations=1)
@@ -434,6 +424,61 @@ def _build_text_ink_mask(img: np.ndarray, text_mask: np.ndarray) -> np.ndarray:
         ink_mask[y:y + h, x:x + w][(ink_uint8 > 0) & box_mask] = 255
 
     return ink_mask
+
+
+def _select_text_ink(gray: np.ndarray, thresh: float) -> np.ndarray:
+    """Pick the glyph class after dropping background connected to box edges."""
+    dark = gray <= thresh
+    light = gray > thresh
+    dark_inner = _remove_border_connected(dark)
+    light_inner = _remove_border_connected(light)
+
+    if np.count_nonzero(dark_inner) or np.count_nonzero(light_inner):
+        ink = (
+            dark_inner
+            if np.count_nonzero(dark_inner) >= np.count_nonzero(light_inner)
+            else light_inner
+        )
+    else:
+        ink = dark if np.count_nonzero(dark) <= np.count_nonzero(light) else light
+
+    return _add_antialiased_text_edges(gray, ink)
+
+
+def _add_antialiased_text_edges(gray: np.ndarray, ink: np.ndarray) -> np.ndarray:
+    """Include same-direction antialiased text pixels without taking the background."""
+    if not np.any(ink):
+        return ink
+    border = np.concatenate([
+        gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]
+    ]).astype(np.float32)
+    border_mean = float(np.mean(border))
+    ink_mean = float(np.mean(gray[ink]))
+
+    if ink_mean < border_mean:
+        candidate = gray <= max(0.0, border_mean - 25.0)
+    else:
+        candidate = gray >= min(255.0, border_mean + 25.0)
+
+    candidate_inner = _remove_border_connected(candidate)
+    if np.any(candidate_inner):
+        return ink | candidate_inner
+    return ink
+
+
+def _remove_border_connected(mask: np.ndarray) -> np.ndarray:
+    """Remove mask components touching the OCR box edge."""
+    if not np.any(mask):
+        return mask.copy()
+    num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8), connectivity=8)
+    border_labels = set(labels[0, :])
+    border_labels.update(labels[-1, :])
+    border_labels.update(labels[:, 0])
+    border_labels.update(labels[:, -1])
+    keep = np.ones(num_labels, dtype=bool)
+    keep[list(border_labels)] = False
+    keep[0] = False
+    return keep[labels]
 
 
 def _estimate_bg_color(bg: np.ndarray) -> np.ndarray:

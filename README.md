@@ -124,6 +124,14 @@ result = convert_batch(
 )
 ```
 
+### 手动视觉 QA
+
+生成 PPT 后如果需要人工对比源图与渲染预览，可单独运行 QA 脚本。它不会随主转换命令自动执行。
+
+```bash
+python scripts/visual_compare_qa.py source.png rendered.png --out-dir qa_dir
+```
+
 ### 参数说明
 
 | 参数 | 默认值 | 说明 |
@@ -185,7 +193,8 @@ any2ppt/
 │   ├── text_detect.py     # 文本检测（OCR + 样式估计）
 │   ├── bg_model.py        # 背景建模（平滑初检 + inpainting 精修）
 │   ├── fg_extract.py      # 前景提取（差分 + 边缘检测 + 连通域拆分）
-│   └── ppt_assemble.py    # PPTX 组装（分层构建）
+│   ├── ppt_assemble.py    # PPTX 组装（分层构建）
+│   └── visual_compare_qa.py # 手动视觉对比 QA
 ├── skills/
 │   └── image-to-ppt/      # 可分发的 Skill 包
 │       ├── SKILL.md

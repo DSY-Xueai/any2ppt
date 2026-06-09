@@ -515,15 +515,32 @@ def _fill_text_regions(img: np.ndarray, text_mask: np.ndarray) -> np.ndarray:
         if not np.any(ink):
             continue
 
-        local_mask = text_mask[sy1:sy2, sx1:sx2] == 0
-        local_pixels = output[sy1:sy2, sx1:sx2][local_mask]
-        if len(local_pixels) == 0:
-            fill = np.median(output.reshape(-1, 3), axis=0)
-        else:
-            fill = np.median(local_pixels.reshape(-1, 3), axis=0)
+        fill = _sample_text_background(box, ink)
+        if fill is None:
+            local_mask = text_mask[sy1:sy2, sx1:sx2] == 0
+            local_pixels = output[sy1:sy2, sx1:sx2][local_mask]
+            if len(local_pixels) == 0:
+                fill = np.median(output.reshape(-1, 3), axis=0)
+            else:
+                fill = np.median(local_pixels.reshape(-1, 3), axis=0)
         output[y1:y2, x1:x2][ink] = np.clip(fill, 0, 255).astype(np.uint8)
 
     return output
+
+
+def _sample_text_background(
+    region: np.ndarray, ink: np.ndarray
+) -> np.ndarray | None:
+    """Sample the text box's own background, avoiding outside-page colors."""
+    background = (~ink).astype(np.uint8) * 255
+    if background.shape[0] >= 3 and background.shape[1] >= 3:
+        background = cv2.erode(background, np.ones((3, 3), np.uint8), iterations=1)
+    pixels = region[background > 0]
+    if len(pixels) < 10:
+        pixels = region[~ink]
+    if len(pixels) < 10:
+        return None
+    return np.median(pixels.reshape(-1, 3), axis=0)
 
 
 def _estimate_text_ink(region: np.ndarray) -> np.ndarray:
@@ -538,21 +555,66 @@ def _estimate_text_ink(region: np.ndarray) -> np.ndarray:
     thresh, _ = cv2.threshold(
         gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
-    border = np.concatenate([
-        gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]
-    ]).astype(np.float32)
-    border_mean = float(np.mean(border))
-
-    if border_mean > float(thresh):
-        cutoff = max(float(thresh), border_mean - 25.0)
-        ink = gray <= cutoff
-    else:
-        cutoff = min(float(thresh), border_mean + 25.0)
-        ink = gray >= cutoff
+    ink = _select_text_ink(gray, float(thresh))
 
     ink_uint8 = ink.astype(np.uint8) * 255
     ink_uint8 = cv2.dilate(ink_uint8, np.ones((3, 3), np.uint8), iterations=1)
     return ink_uint8 > 0
+
+
+def _select_text_ink(gray: np.ndarray, thresh: float) -> np.ndarray:
+    """Pick the glyph class after dropping background connected to box edges."""
+    dark = gray <= thresh
+    light = gray > thresh
+    dark_inner = _remove_border_connected(dark)
+    light_inner = _remove_border_connected(light)
+
+    if np.count_nonzero(dark_inner) or np.count_nonzero(light_inner):
+        ink = (
+            dark_inner
+            if np.count_nonzero(dark_inner) >= np.count_nonzero(light_inner)
+            else light_inner
+        )
+    else:
+        ink = dark if np.count_nonzero(dark) <= np.count_nonzero(light) else light
+
+    return _add_antialiased_text_edges(gray, ink)
+
+
+def _add_antialiased_text_edges(gray: np.ndarray, ink: np.ndarray) -> np.ndarray:
+    """Include same-direction antialiased text pixels without taking the background."""
+    if not np.any(ink):
+        return ink
+    border = np.concatenate([
+        gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]
+    ]).astype(np.float32)
+    border_mean = float(np.mean(border))
+    ink_mean = float(np.mean(gray[ink]))
+
+    if ink_mean < border_mean:
+        candidate = gray <= max(0.0, border_mean - 25.0)
+    else:
+        candidate = gray >= min(255.0, border_mean + 25.0)
+
+    candidate_inner = _remove_border_connected(candidate)
+    if np.any(candidate_inner):
+        return ink | candidate_inner
+    return ink
+
+
+def _remove_border_connected(mask: np.ndarray) -> np.ndarray:
+    """Remove mask components touching the OCR box edge."""
+    if not np.any(mask):
+        return mask.copy()
+    num_labels, labels = cv2.connectedComponents(mask.astype(np.uint8), connectivity=8)
+    border_labels = set(labels[0, :])
+    border_labels.update(labels[-1, :])
+    border_labels.update(labels[:, 0])
+    border_labels.update(labels[:, -1])
+    keep = np.ones(num_labels, dtype=bool)
+    keep[list(border_labels)] = False
+    keep[0] = False
+    return keep[labels]
 
 
 # ---------------------------------------------------------------------------

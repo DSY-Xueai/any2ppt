@@ -616,7 +616,7 @@ def _build_text_mask(
 
 def _load_rgb(path: Path) -> np.ndarray:
     """Load image as RGB numpy array."""
-    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise FileNotFoundError(f"Cannot read image: {path}")
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
